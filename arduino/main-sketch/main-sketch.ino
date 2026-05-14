@@ -2,15 +2,14 @@
 #include <BleGamepad.h>
 #include <Wire.h>
 #include <SPI.h>
-#include <Adafruit_LIS3DH.h>
-#include <Adafruit_Sensor.h>
+#include <SparkFunLIS3DH.h>
 
 #define LIS3DH_CLK 14
 #define LIS3DH_MISO 12
 #define LIS3DH_MOSI 13
 #define LIS3DH_CS 15
 
-Adafruit_LIS3DH lis = Adafruit_LIS3DH(LIS3DH_CS, LIS3DH_MOSI, LIS3DH_MISO, LIS3DH_CLK);
+LIS3DH lis = LIS3DH(SPI_MODE, 15);
 
 struct Button {
     uint8_t pin;
@@ -30,13 +29,23 @@ Button buttons[] = {
     {21, BUTTON_9}, // select
 };
 
-BleGamepad bleGamepad("Guitar Hero Xplorer Wireless", "Cole Patterson");
+BleGamepad bleGamepad("GH3 Gibson", "Cole Patterson");
+
+unsigned long previousMillis = 0;
+const long interval = 250;
+
+bool pairingLedState = true;
 
 void setup() {
-    Serial.begin(115200);
+    // Serial.begin(115200);
 
-    if (! lis.begin(0x18)) {   // change this to 0x19 for alternative i2c address
-        Serial.println("Couldn't connect to LIS3DH");
+    SPI.begin(LIS3DH_CLK, LIS3DH_MISO, LIS3DH_MOSI, LIS3DH_CS);
+
+    uint8_t lisCode = 0;
+    lisCode = lis.begin();
+
+    if ((lisCode != 0x00) && (lisCode !=0xFF)) {
+        // Serial.println("Couldn't connect to LIS3DH");
     }
 
     BleGamepadConfiguration bleGamepadConfig;
@@ -48,31 +57,36 @@ void setup() {
     }
 
     pinMode(32, INPUT); // whammy
+    pinMode(23, OUTPUT); // active LED
 
     bleGamepad.setRightThumb(0);
 }
 
 void loop() {
-    if (!bleGamepad.isConnected()) return;
+    if (!bleGamepad.isConnected()) {
+        if (pairingLedState) digitalWrite(23, LOW);
+        else digitalWrite(23, HIGH);
 
-    lis.read();
-    sensors_event_t event;
-    lis.getEvent(&event);
+        unsigned long currentMillis = millis();
 
-    float accelRaw = event.acceleration.x;
-    accelRaw = constrain(accelRaw, -10.0, 10.0);
-    accelRaw += 10.0;
-    float accelMagnitude = accelRaw / 20.0;
-    float accel = accelMagnitude * 32767;
+        if (currentMillis - previousMillis >= interval) {
+            pairingLedState = !pairingLedState;
+            previousMillis = currentMillis;
+        }
+
+        return;
+    };
+
+    digitalWrite(23, LOW);
+
+    float accelRaw = constrain(lis.readFloatAccelX(), -1.0, 1.0) + 1.0;
+    float accel = 32767 - (accelRaw * 16383.5);
     int accelInt = int(trunc(accel));
 
     int raw = analogRead(32);
-    raw = constrain(raw, 290, 2270);
-    
-    int magnitude = raw - 290;
-    int value = magnitude * 16;
+    raw = constrain(raw, 0, 4096);
 
-    bleGamepad.setRightThumb(value, accelInt);
+    bleGamepad.setRightThumb(raw * 4, accelInt);
 
     for (auto &btn : buttons) {
         bool state = digitalRead(btn.pin);
